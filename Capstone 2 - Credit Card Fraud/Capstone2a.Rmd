@@ -1,0 +1,585 @@
+---
+title: "Data Science Capstone - HarvardX PH125.9x - Credit Card Fraud"
+author: "Sethtrevor Smithson"
+date: "05NOV2022"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+---
+
+# Introduction
+
+The aim of this project is to create a model that can identify fraudulent credit card charges based on a dataset of two-days of credit card charges made by European cardholders.
+
+The dataset was collected and analyzed by a collaborative group from Worldline and the Machine Learning Group at Université Libre de Bruxelles.  The Version 3 dataset provided has been anonymized and undergone a PCA transformation with only the "Time" and "Amount" columns being untransformed.  The "Time" column represents the number of seconds elapsed between each transaction relative to the first transaction in the dataset.  The "Amount" column represents the financial transaction amount.  These variables in addition to the remaining variables "V-" are utilized to build a model to predict the target variable, "Class" within which a designation of "1" indicated a fraudulent transaction and "0" indicates a real transaction.
+
+Specifically, the goal of this project is to train a machine learning algorithm which uses the inputs in one subset (i.e. the training) to predict the movie ratings in the validation subset. The performance of the algorithm is assessed using the Area Under the Precision-Recall Curve  (AUCPR).  This model could have real-world application in the finance and banking industry to identify fraudulent account activity, thereby preventing transactions that would be reimbursed via insurance.  This would result in a cost savings for the insurance premiums that the financial institution pays, which is a market in the billions USD.  However, if there are too many false positives, it could result in frustrated customers.  Therefore, a careful balance must be established.
+
+The Credit Card Fraud dataset consists of a total of 284,807 observations (rows) with 31 variables (columns), with 30 dependent variables and one target variable.  For the first part of this project, the features of the dataset is explored to determine the possible trends.  The validation subset will be created utilizing 25% of the total dataset. The characteristics and trends which were observed in the data exploration phase will guide the data analysis section.  After exploration, machine learning models were built and tested for their performance via their AUCPR score.
+
+---
+
+## Data Preparation
+
+In this section, we will load the required R libraries, the source data, perform data cleaning, and data preparation. This will install an/or load all the required packages here.
+
+```{r Library Load, echo=FALSE, message=FALSE, results='hide'}
+
+# Clean the R environment
+rm(list = ls())
+
+# Trigger garbage collection and free up some memory
+gc(TRUE, TRUE, TRUE)
+
+# Time to check if the prerequisite packages are installed.  If they are not, R will download them.
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(h2o)) install.packages("h2o", repos = "http://cran.us.r-project.org")
+if(!require(lubridate)) install.packages("lubridate", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(DataExplorer)) install.packages("DataExplorer", repos = "http://cran.us.r-project.org")
+if(!require(corrplot)) install.packages("corrplot", repos = "http://cran.us.r-project.org")
+
+# Time to load the libraries.
+library(tidyverse) # the swiss army knife for everything
+library(h2o) # A library that makes modeling much faster and use less memory
+library(lubridate) # A helpful library for formatting data
+library(data.table) # loading for fread function in the data loading
+library(DataExplorer) # contains a function useful for EDA plotting
+library(corrplot) # a helpful library for building correlation plots
+
+```
+
+Here are the system and packages loaded:
+
+```{r}
+# Let's display the system info
+sessionInfo()
+```
+
+Time to Load the Data. The Credit Card Fraud dataset can be found here:
+* <https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud>
+
+```{r load data}
+# Read in the data and split it into train/test subsets
+cc_fraud_df = read.csv("creditcard.csv")
+```
+
+---
+
+# Exploratory Data Analysis
+
+```{r data structure}
+# Check Structure of the Data
+str(cc_fraud_df)
+```
+
+From the structure, we can see that there are 284,807 observations and 31 variables.  Each variable appears to be encoded appropriately based on the leading values that are displayed.  However, the Class column is in "int" datatype; it should technically be in factor datatype.  This will be converted later after doing some exploratory data analysis.
+
+Let's check how the dataframe appears at the headd and tail.
+```{r dataframe head and tail}
+# Check the dattaframe head
+head(cc_fraud_df, n = 10)
+tail(cc_fraud_df, n = 10)
+```
+From looking at the head and tail of the dataframe, it can be observed that the Time variable is not encoded as a typical timestamp.  The max Time variable (172,792 S) is withing the number of seconds in two days (172,800 s), which aligns with the stated fact that the dataset is the number of transactions collected over two days.
+
+```{r check for missing data}
+# Check for empty or missing data
+sum(is.na(cc_fraud_df))
+```
+There is no missing data in this dataset.  This makes data preparation easier.
+
+```{r check for duplicated data}
+# Check for duplicated data
+sum(duplicated(cc_fraud_df))
+```
+
+It is observed that there are over 1,000 duplicated rows of data.  Normally, it would be wise to simply eliminate these.  However, in the context of this project, there may be duplicate transactions made within milliseconds of each other that could be fraudulent.  As such, these duplicate rows will be kept.
+
+```{r remove duplicated data}
+# If one wanted to Remove duplicated rows, this would be the command to do so:
+# cc_fraud_df <- cc_fraud_df %>% distinct()
+```
+
+```{r column summary}
+# Check the data summary for each column
+summary(cc_fraud_df)
+```
+
+Let's check the target variable and how many transactions are real vs. fraudulent.
+```{r target variable descriptive statistics}
+# Check the binary classification for the Class column
+table(cc_fraud_df$Class)
+```
+Let's see how this looks in relative terms:
+```{r target variable descriptive statistics relative}
+# Check the binary classification for the Class column in percent terms
+table(cc_fraud_df$Class) / nrow(cc_fraud_df)
+```
+
+---
+
+Let's check how the time influences the transaction types
+```{r Check the influence of time}
+# Define a theme
+common_theme <- theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# Create the plot
+cc_fraud_df %>% ggplot(aes(x = Time, fill = factor(Class))) + geom_histogram(bins = 600) + labs(x = "Time Since First Transaction (s)", y = "Quantity of Transactions") + ggtitle("Distribution of Transaction Time by Class") + facet_grid(Class ~ ., scales = 'free_y') + common_theme
+```
+From this graphic, we can see that there appears to be some basal level of fraudulent transactions throughout the day, but there are a few spikes that occur when during the early hours of the morning when there is no typical real transaction activity.
+
+Let's check the transaction amounts by Class
+```{r Check the influence of transaction amounts by class}
+# Create the plot
+ggplot(cc_fraud_df, aes(x = factor(Class), y = Amount)) + geom_boxplot() + 
+labs(x = 'Class', y = 'Transaction Amount') +
+ggtitle("Boxplot of Transaction Amount Distribution by Class") + common_theme
+```
+
+Let's check for correlations between the variables
+```{r Check the correlations between variables}
+# Create the plot
+correlations <- cor(cc_fraud_df[,-1], method="pearson")
+corrplot(correlations, number.cex = .9, method = "circle", type = "upper", tl.cex=0.8, tl.col = "black")
+```
+The results of this plot are not surprising since this published dataset underwent pre-processing to anonymize and transform the data with PCA.  The most positively correlated variables appear to be V11, V4, and V2.  The most negatively correlated variables appear to be V12, V14, and V7.
+
+Let's check how closely these top six correlations appear when compared to the Class.
+
+V11 and Class distributions
+```{r Check the correlation with V11}
+# Create the plot
+ggplot(cc_fraud_df, aes_(x = ~factor(Class), 
+                  y = cc_fraud_df$V11)) + 
+  geom_violin(fill = "cornflowerblue") + 
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2)
+```
+
+V4 and Class distributions
+```{r Check the correlation with V4}
+# Create the plot
+ggplot(cc_fraud_df, aes_(x = ~factor(Class), 
+                  y = cc_fraud_df$V4)) + 
+  geom_violin(fill = "cornflowerblue") + 
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2)
+```
+
+V2 and Class distributions
+```{r Check the correlation with V2}
+# Create the plot
+ggplot(cc_fraud_df, aes_(x = ~factor(Class), 
+                  y = cc_fraud_df$V2)) + 
+  geom_violin(fill = "cornflowerblue") + 
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2)
+```
+
+V12 and Class distributions
+```{r Check the correlation with V12}
+# Create the plot
+ggplot(cc_fraud_df, aes_(x = ~factor(Class), 
+                  y = cc_fraud_df$V12)) + 
+  geom_violin(fill = "cornflowerblue") + 
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2)
+```
+
+V14 and Class distributions
+```{r Check the correlation with V14}
+# Create the plot
+ggplot(cc_fraud_df, aes_(x = ~factor(Class), 
+                  y = cc_fraud_df$V12)) + 
+  geom_violin(fill = "cornflowerblue") + 
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2)
+```
+
+V17 and Class distributions
+```{r Check the correlations with V17}
+# Create the plot
+ggplot(cc_fraud_df, aes_(x = ~factor(Class), 
+                  y = cc_fraud_df$V12)) + 
+  geom_violin(fill = "cornflowerblue") + 
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "orange",
+               outlier.size = 2)
+```
+
+---
+
+## Insights gained
+
+As mentioned in the Introduction about the dataset, with the exception of the Time and Class variables, all the variables have already undergone a PCA transformation. There is no information provided as to the origin of all the variables.  This has resulted in a low number of variables with high correlation.
+
+Nonetheless, from the data wrangling, it is observed that there are over 1,000 duplicate rows.  While these would be typically removed from the dataset, these may represent recurring charges made within milliseconds, which may be a good indicator of a fraudulent activity.  Thus, these duplicate rows were kept.
+
+For the target class, it can be observed that only 0.172% of transactions are fraudulent.  This means that the dataset is massively imbalanced for model training.  This imbalance impacts which models will be most applicable and which metrics will be the most useful.
+
+- To prevent data leakage due to the imbalance, any pre-processing of the data must be completed prior to splitting the data.  Fortunately, the dataset providers have already performed preprocessing.
+
+- As a significantly imbalanced dataset, it limits the models that can be applied to the dataset without violating their balanced assumptions.  In order to use common models, there are additional techniques that could be applied to address the imbalancing such as undersampling the over-represented data, over-sampling the under-represented data, using an algorithmic sampling tool such as Tomek Links or SMOTE, combinations of data augmentation such as constructing mimicking synthetic training data, or applying class weights to the model in order to penalize misclassifications, or the business problem could be approached as anomaly detection instead of as a classification problem.  Nevertheless, to side-step these complications, this project will utilize models that are not impacted by imbalanced dataset and that are still optimal for supervised classification machine learning.
+
+- An additional concern of working with an imbalanced dataset is that metrics derived from a confusion matrix (such as Accuracy, Precision, False, False Negative Rate, etc.) will be skewed to appear better than they actually are -- it will be easy to score 99%+ accuracy since 99.828% of the transactions are real.  Instead, this project will utilize the Area Under the Precision-Recall Curve (AUPRC) to measure model performance.  This metric is optimized for finding positives where a perfect score is obtained if all of the positives are found (perfect recall) without accidentally creating false positives (perfect precision). It must be noted that this metric does not utilize True Negatives at all, which means that the AUPRC will not be impacted by a large proportion of true negatives in the dataset (like this imbalanced dataset).  This makes AUPRC more sensitive to True Positives, False Positives, and False Negatives.  For this metric, the closer its AUPRC score approaches the proportion of true positives (0.99828), the better the model is performing.
+
+---
+
+# Modeling
+
+As discussed, this project will utilize machine learning models that tolerate imbalanced data for this supervised classification business problem:  ensemble methods in the form of Gradient Boost Machines (GMB) and Random Forest (RF) for this project as well as a Neural Networks (NN).  Other models that fair well with imbalanced classes such as Adaboost, XGboost, K-Nearest Neighbors, and certain flavors of Naive Bayes will not be evaluated due to limitations of h2o and the author's machine.  Models that have been previously described as not suitable for imbalanced data such as Regressions, Support Vector Machines, Linear Discriminant Analysis, Quadratic Discriminant Analysis, Multi-Layer Perceptrons, etc. will not be evaluated. Furthermore, just to emphasize the suitability of the models chosen by the author, h2o's AutoML will be utilized to train several models to reconcile what models perform the best with algorithmically chosen and evaluated.  It is anticipated that models that do not fair well in the leaderboard will be absent.
+
+For the modeling, H2O is going to be utilized for its speed and memory compression.  Nevertheless, the modeling process will consume up to 64 GB of RAM while it creates various ensemble or neural network models. These steps were attempted before using Caret, NerualNet, and RandomForest libraries and required even more RAM (up to 450GB of RAM).  This is beyond the capacity of most users and may require access to a High-Performance-Computer at an institution or renting cloud computing clusters.  H2O is much more pragmatic for a high-end desktop personal computer.  The H2O library utilizes Java to enable greater parallel processing and utilize memory more efficiently.  It will use a greater amount of the processor clock cycles than other packages (e.g., Caret) while using up to 20x less RAM.  All modeling approaches will utilize k-fold crossvalidation, be set to evaluate a Cartesian grid of hyperparameters using random search, and select the optimal model based on the previously discussed metric of Area Under the Precision-Recall Curve (AUPRC).
+
+Note:  Ensure that **Java 64-bit** and **R 64-bit** are installed prior to running these scripts.  The cutoff time for model building is set to 120 minutes.  With four modeling codeblocks, this mean that executing these scripts may take up to **8 hours**.
+
+---
+
+## Initialize H2O
+
+```{r initiate h2o}
+## Initialize H2O on the local machine
+h2o.init(
+    nthreads = -1, # Specifying to use all processor cores available
+    max_mem_size = "64G" # Specifying to use 64GB of RAM.  More could be used, but, if running on Linux or Mac, be sure to reserve 33% of system memory per XGBoost limitations
+)
+```
+
+```{r convert the data and encode correctly}
+# Assign the training and target variables.
+cc_fraud_df_h2o <- as.h2o(cc_fraud_df) # Convert current dataframe to h2o dataframe
+cc_fraud_df_h2o[c("Class")] <- as.factor(cc_fraud_df_h2o[c("Class")]) #  Changing target column type to factor for classification work in h2o
+```
+
+```{r split the data, echo=TRUE, message=FALSE, results='hide'}
+# Split the data
+
+# Split dataset giving the training dataset 75% of the data
+cc_fraud_df_h2o_split <- h2o.splitFrame(data = cc_fraud_df_h2o, ratios = 0.75, seed = 42)
+
+# Create a training set from the 1st dataset in the split
+cc_fraud_df_h2o_train <- cc_fraud_df_h2o_split[[1]]
+
+# Create a testing set from the 2nd dataset in the split
+cc_fraud_df_h2o_test <- cc_fraud_df_h2o_split[[2]]
+```
+
+```{r designate the target variable and training variables}
+# Assign the training and target variables.
+y <- "Class"
+x <- setdiff(names(cc_fraud_df_h2o_train), y)
+```
+
+---
+
+#### Gradient Boosting Machine
+
+```{r GBM model creation, echo=TRUE, message=FALSE, results='hide'}
+
+# Set hyperparameter grid:
+gbm_hyper_grid.h2o <- list(
+    ntrees = seq(100, 500, by = 20), 
+    max_depth = seq(3, 30, by = 1),
+    min_rows = seq(1, 10, by = 1),
+    nbins = seq(1, 2000, by = 25),
+    learn_rate = c(0.005, 0.025, by = 0.001)
+)
+
+# Create a Random Discrete Grid Search
+gbm_search_criteria <- list(
+    strategy = "RandomDiscrete", # Selecting Random Search of the hyperparameter grid
+    stopping_metric = "AUCPR", # The metric being optimized for in model training
+    seed = 42, # Setting the seed to the answer to life, the universe, and everything.
+    max_runtime_secs = 120*60 # Specifying a max run-time for this command in seconds (two hours)
+)
+
+# Model 3:  Gradient Boosting Machine modeling
+gbm_random_grid <- h2o.grid(
+    algorithm = "gbm", # Selecting the Algorithm to build the model
+    grid_id = "gbm_grid", # Naming the grid
+    x = x, # Specifying the training data labels
+    y = y, # Specifying the target attribute label
+    nfolds = 3, # K-Fold Cross Validation
+    training_frame = cc_fraud_df_h2o_train, # Training Data selection
+    hyper_params = gbm_hyper_grid.h2o, # Specifying the hyperparameter grid to try
+    search_criteria = gbm_search_criteria # Specifying the search criteria to utilize
+)
+
+```
+
+```{r GBM model evaluation}
+
+# Collect the results and sort by our models: 
+gbm_grid_perf <- h2o.getGrid(
+    grid_id = "gbm_grid", # Grid of models
+    sort_by = "AUCPR", # Sorting the leaderboard by the desired metric
+    decreasing = TRUE # Sort by Ascending/Increasing Values
+)
+print(gbm_grid_perf)
+
+# Best model: 
+best_gbm_model <- h2o.getModel(gbm_grid_perf@model_ids[[1]])
+print(best_gbm_model@model[["model_summary"]])
+
+# Retrieve the variable importance
+gbm_varimp <- h2o.varimp(best_gbm_model)
+print(gbm_varimp)
+
+# Check model performance
+gbm_perf <- h2o.performance(best_gbm_model, cc_fraud_df_h2o_test)
+print(gbm_perf)
+
+# Save and display the AUCPR
+gbm_AUCPR <- h2o.aucpr(gbm_perf)
+print(gbm_AUCPR)
+
+```
+
+---
+
+### Random Forest
+
+```{r h2o Random Forest model creation, echo=TRUE, message=FALSE, results='hide'}
+
+# Set hyperparameter grid for RF:
+rf_hyper_grid <- list(
+    ntrees = seq(1, 2000, by = 50),
+    mtries = seq(1, 100, by = 2),
+    max_depth = seq(1, 30, by = 1),
+    min_rows = seq(1, 20, by = 1),
+    nbins = seq(50, 2000, by = 50),
+    sample_rate = seq(0.05, 0.95, by = 0.05)
+)
+
+# Create a Random Discrete Grid Search
+rf_search_criteria <- list(
+    strategy = "RandomDiscrete",  # Selecting Random Search of the hyperparameter grid
+    stopping_metric = "AUCPR", # Targeting the best AUCPR
+    max_runtime_secs = 120*60, # Stop search after 120 minutes
+    stopping_tolerance = 0.005, # stop if improvement is < 0.5%
+    stopping_rounds = 1000 # Over the last 25 models
+)
+
+# Parameters for Random Forest Model
+random_grid <- h2o.grid(
+    algorithm = "randomForest", # Selecting the Algorithm to build the model
+    grid_id = "rf_grid", # Grid of models
+    x = x, # Specifying the training data labels
+    y = y, # Specifying the target attribute label
+    seed = 42, # Setting the seed to the answer to life, the universe, and everything.
+    nfolds = 3, # K-Fold Cross Validation
+    training_frame = cc_fraud_df_h2o_train, # Training Data selection
+    hyper_params = rf_hyper_grid, # Specifying the hyperparameter grid to try
+    search_criteria = rf_search_criteria # Specifying the search criteria to utilize
+)
+
+```
+
+```{r h2o Random Forest model evaluation}
+
+# Collect the results and sort by our models: 
+rf_grid_perf <- h2o.getGrid(
+    grid_id = "rf_grid", # Name of the grid
+    sort_by = "AUCPR", # Targeting the best AUCPR 
+    decreasing = TRUE # Sort by greatest
+)
+print(rf_grid_perf)
+
+# Best model: 
+best_rf_model <- h2o.getModel(rf_grid_perf@model_ids[[1]])
+print(best_rf_model)
+
+# Retrieve the variable importance
+rf_varimp <- h2o.varimp(best_rf_model)
+print(rf_varimp)
+
+# Check Model performance
+rf_perf <- h2o.performance(best_rf_model, cc_fraud_df_h2o_test)
+print(rf_perf)
+
+# # Save and display the AUCPR
+rf_AUCPR <- h2o.aucpr(rf_perf)
+print(rf_AUCPR)
+
+```
+
+---
+
+#### Neural Network
+
+```{r h2o Neural Network model creation, echo=TRUE, message=FALSE, results='hide'}
+
+# Set hyperparameter grid:
+nn_hyper_grid <- list(
+    hidden = list(
+      c(30), # One hidden layer with 30 nodes since there are 30 features/variables
+      c(30, 30), # two hidden layers
+      c(30, 30, 30), # three hidden layers
+      c(30, 30, 30, 30), # four hidden layers
+      c(30, 30, 30, 30, 30) # five hidden layers
+    ),
+    input_dropout_ratio = seq(0, 0.1, by = 0.01),
+    rate = seq(0, 0.05, by = 0.01),
+    rate_annealing = c(1e-10,1e-9,1e-8,1e-7,1e-6,1e-5)
+)
+
+# Create a Random Discrete Grid Search
+nn_search_criteria <- list(
+    strategy = "RandomDiscrete",  # Selecting Random Search of the hyperparameter grid
+    stopping_metric = "AUCPR", # Targeting the best AUCPR
+    seed = 42, # Setting the seed to the answer to life, the universe, and everything.
+    max_runtime_secs = 120*60 # Stop after 120 minutes
+)
+
+# Parameters for Gradient Boost Machine
+nn_random_grid <- h2o.grid(
+    algorithm = "deeplearning", # Selecting the Algorithm to build the model
+    grid_id = "nn_grid", # Grid of models
+    x = x, # Specifying the training data labels
+    y = y, # Specifying the target attribute label
+    nfolds = 3, # K-Fold Cross Validation
+    training_frame = cc_fraud_df_h2o_train, # Training Data selection
+    hyper_params = nn_hyper_grid, # Specifying the hyperparameter grid to try
+    search_criteria = nn_search_criteria # Specifying the search criteria to utilize
+)
+
+```
+
+```{r h2o Neural Network model evaluation}
+# Collect the results and sort by our models: 
+nn_grid_perf <- h2o.getGrid(
+    grid_id = "nn_grid", 
+    sort_by = "AUCPR", 
+    decreasing = TRUE
+)
+print(nn_grid_perf)
+
+# Best model: 
+best_nn_model <- h2o.getModel(nn_grid_perf@model_ids[[1]])
+print(best_nn_model@model[["model_summary"]])
+
+# Check model performance
+nn_perf <- h2o.performance(
+  best_nn_model, 
+  newdata = cc_fraud_df_h2o_test)
+
+# Find the AUCPR
+nn_AUCPR <- h2o.aucpr(nn_perf)
+print(nn_AUCPR)
+
+```
+
+---
+
+#### AutoML
+
+```{r AutoML model creation, echo=TRUE, message=FALSE, results='hide'}
+
+# Setup the Auto Machine Learning Modeling
+aml2 <- h2o.automl(
+    x = x, # Specifying the training data
+    y = y, # Specifying the target attribute
+    training_frame = cc_fraud_df_h2o_train, # Specifying the data to be used for training the model
+    validation_frame = cc_fraud_df_h2o_test, # Specifying the data to be used for evaluating the model
+    stopping_metric = c("AUCPR"), # Specifying the metric for the models to be optimized for
+    stopping_rounds = 5, # Specifying that each algorithm-iteration should be judged against the moving average of the last five models
+    sort_metric = c("AUCPR"), # Sorting the leaderboard by the desired metric
+    nfolds = 0, # Normally nfolds would be != 0 in order to use crossvalidation.  However, for autoML, when nfolds !=0, the validation_frame is ignored
+    seed = 42, # Setting the seed for reproducibility and the answer to the universe, life, and everything
+    max_runtime_secs = 120*60, # Specifying a max runtime for this command in seconds (120 minutes)
+)
+
+```
+
+```{r AutoML model evaluation}
+
+# Best model: 
+best_aml2_model <- h2o.get_best_model(aml2)
+print(best_aml2_model)
+
+aml <- h2o.get_best_model(aml2)
+preds <- h2o.predict(aml, cc_fraud_df_h2o_test)
+aml@model$validation_metrics@metrics$max_criteria_and_metric_scores
+print(aml@model$validation_metrics@metrics$max_criteria_and_metric_scores)
+
+# Collect the model performance
+perf <- h2o.performance(model = aml, newdata = cc_fraud_df_h2o_test)
+
+# Find the AUCPR
+autoML_AUCPR <- h2o.aucpr(perf)
+print(autoML_AUCPR)
+
+```
+
+---
+
+
+# Results
+### Modeling results and performance
+```{r gathering all the results}
+
+## Display a table summarizing the RSME generated by models
+AUCPR_results <- c(gbm_AUCPR, rf_AUCPR, nn_AUCPR, autoML_AUCPR) # Column of metric results
+AUCPR_names <-  c("GBM", "RF", "NN", "AutoML") # Label column for the corresponding metrics
+AUCPR_df <- base::data.frame(AUCPR_names, AUCPR_results) 
+ # Create a dataframe of results and sort in ascending order
+print(AUCPR_df %>% dplyr::arrange(desc(AUCPR_df$AUCPR_results))) # Display the sorted dataframe
+
+```
+
+---
+
+# Conclusion
+
+From the dataframe of results, it is observed that the ultimate, best-performing model was Random Forest.  The penultimate model was one generated by the AutoML function, which produced a Distributed Random Forest.  The antepenultimate model was the Gradient Boost Machine.  Collectively, these models performed similarly.  The Neural Network performed over 5% worse.  On relative terms, although the author's AUCPR scores did not equalize out to the theoretical max of 0.99828, they did exceed those that can be commonly found for this dataset, ranging anywhere from 0.805 - 0.890.  Furthermore, as the author's model scored higher than the AutoML and the AutoML one was an ensemble model, the limited scope of this project was achieved.
+
+However, there can always be improvements.  Further model building and optimization may be achieved by:
+- Reducing the number of features by performed such methods as filter methods (univariate and/or multivariate scores), search methods (e.g., forward-selection, backward-selection, or recursive feature elimination), or embedded methods such as regularization (e.g., L1 and L2).  This would reduce the size of the dataset and potentially reduce overfitting, thereby improving model performance.  Reducing the dataset may also allow 
+- Try exhaustive cross-validation grid search.  By using Random Search, it is possible that a localized optimization was found instead of a global optimum.  Furthermore, the training process for computationally expensive algorithms was probably interrupted before many hyperparameters were evaluated.  By using grid-search and extending the maximum run time, more optimal models could be generated.
+- In additional to n-fold cross-validation, Leave-p-out Cross-Validation could be performed to further produce a more optimal model if more computational resources are available.
+- Try additional models and packages suitable for imbalanced data:
+  + AdaBoost (requires use of other packages)
+  + XGBoost (requires Linux in H2O or use of a different package(s))
+  + Deep Learning Models (requires use of other packages)
+- Try models that are not suitable for imbalanced data by applying additional techniques to address the imbalancing such as undersampling the over-represented data, over-sampling the under-represented data, using an algorithmic sampling tool such as Tomek Links or SMOTE or t-SNE, combinations of data augmentation such as constructing mimicking synthetic training data, or applying class weights to the model in order to penalize misclassifications.
+- Try additional packages that may accelerate computation (e.g., H2O4GPU) and/or utilize larger computational systems (e.g. cloud virtual machines).
+- Try utilizing the anomaly detection approach instead of classification
+
+Overall, this capstone project using financial data was challenging and I learned a lot about R and the packages I used to complete the assignment.
+
+---
+
+# References:
+- Tischio, R.M. and Weiss, G.M., 2019. Identifying classification algorithms most suitable for imbalanced data. Dept. Comput. Inf. Sci., Fordham Univ., The Bronx, NY, USA, Tech. Rep.
+- Andrea Dal Pozzolo, Olivier Caelen, Reid A. Johnson and Gianluca Bontempi. Calibrating Probability with Undersampling for Unbalanced Classification. In Symposium on Computational Intelligence and Data Mining (CIDM), IEEE, 2015
+- Dal Pozzolo, Andrea; Caelen, Olivier; Le Borgne, Yann-Ael; Waterschoot, Serge; Bontempi, Gianluca. Learned lessons in credit card fraud detection from a practitioner perspective, Expert systems with applications,41,10,4915-4928,2014, Pergamon
+- Dal Pozzolo, Andrea; Boracchi, Giacomo; Caelen, Olivier; Alippi, Cesare; Bontempi, Gianluca. Credit card fraud detection: a realistic modeling and a novel learning strategy, IEEE transactions on neural networks and learning systems,29,8,3784-3797,2018,IEEE
+- Dal Pozzolo, Andrea Adaptive Machine learning for credit card fraud detection ULB MLG PhD thesis (supervised by G. Bontempi)
+- Carcillo, Fabrizio; Dal Pozzolo, Andrea; Le Borgne, Yann-Aël; Caelen, Olivier; Mazzer, Yannis; Bontempi, Gianluca. Scarff: a scalable framework for streaming credit card fraud detection with Spark, Information fusion,41, 182-194,2018,Elsevier
+- Carcillo, Fabrizio; Le Borgne, Yann-Aël; Caelen, Olivier; Bontempi, Gianluca. Streaming active learning strategies for real-life credit card fraud detection: assessment and visualization, International Journal of Data Science and Analytics, 5,4,285-300,2018,Springer International Publishing
+- Bertrand Lebichot, Yann-Aël Le Borgne, Liyun He, Frederic Oblé, Gianluca Bontempi Deep-Learning Domain Adaptation Techniques for Credit Cards Fraud Detection, INNSBDDL 2019: Recent Advances in Big Data and Deep Learning, pp 78-88, 2019
+- Fabrizio Carcillo, Yann-Aël Le Borgne, Olivier Caelen, Frederic Oblé, Gianluca Bontempi Combining Unsupervised and Supervised Learning in Credit Card Fraud Detection Information Sciences, 2019
+- Yann-Aël Le Borgne, Gianluca Bontempi Reproducible machine Learning for Credit Card Fraud Detection - Practical Handbook
+- Bertrand Lebichot, Gianmarco Paldino, Wissam Siblini, Liyun He, Frederic Oblé, Gianluca Bontempi Incremental learning strategies for credit cards fraud detection, International Journal of Data Science and Analytics
+
+
+```{r Closing the h2o Cluster}
+
+# Close the h2o cluster
+h2o.shutdown(prompt=F)
+
+```
