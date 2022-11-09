@@ -1,0 +1,706 @@
+---
+title: "Data Science Capstone - HarvardX PH125.9x - MovieLens"
+author: "Seth Smithson"
+date: "25SEP2022"
+output:
+  html_document: default
+  pdf_document: default
+# Files needed for submission:  PDF, RMD, and R script
+---
+
+
+
+# Introduction
+
+The aim of this project is to create a movie recommendation system using the 10M version of the MovieLens dataset, which was collected by GroupLens Research. Specifically, the goal is to train a machine learning algorithm which uses input, feature variables to predict the target variable, users' movie ratings. The performance of the algorithm is assessed by applying the model to a held-out validation dataset and measuring the root mean squared error (RMSE).
+
+The MovieLens dataset was collected at a website (<http://www.movielens.org/>) that allowed users to rate films from one to five stars at half-star increments. These datasets are commonly used by video content providers (e.g. Netflix), online stores (e.g. Amazon), and other companies to utilize data collected from users to develop recommender systems for users.  These recommender systems are statistical machine learning systems that allow for the creation of lists of content items to recommend to users based on user data that has been collected, everything from customers' shopping carts to product ratings and their similarities.
+
+The MovieLens dataset consists of a total of 10,000,054 observations (rows) with 6 variables (columns): userId, movieId, rating, timestamp, title, and genres.  There are a total of 95,580 tags, 10,681 movies, and 71,567 users.  For the first part of this project, the features of the training dataset ("edx") is explored to determine the possible trends in movie ratings.  The validation subset is 10% of the total MovieLens data, and contains 999,999 observations. The code needed to create these data subsets were provided in the online course materials. The characteristics and trends which were observed in the data exploration phase will guide the data analysis section.  This will require data transformation in order to organize and clean the data.
+
+After exploration, machine learning models are built and tested for their accuracy via RSME.  The final RSME from the model building was XXYY.
+
+# Data Preparation
+
+In this section, we will load the required R libraries, the source data, perform data cleaning, and data preparation. This will install an/or load all the required packages here.
+
+Note:  This process could take a couple of minutes.
+
+```{r Library Load, echo=TRUE, message=FALSE, results='hide'}
+# Clean the R environment
+rm(list = ls())
+
+# Trigger garbage collection and free up some memory
+gc(TRUE, TRUE, TRUE)
+
+# Time to check if the prerequisite packages are installed.  If they are not, R will download them.
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(h2o)) install.packages("h2o", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(lubridate)) install.packages("lubridate", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(Rcpp)) install.packages("Rcpp", repos = "http://cran.us.r-project.org")
+if(!require(DataExplorer)) install.packages("DataExplorer", repos = "http://cran.us.r-project.org")
+
+# Time to load the libraries.
+library(tidyverse) # the swiss army knife for everything
+library(caret) # A library that makes modeling easier
+library(h2o) # A library that makes modeling much faster and use less memory
+library(lubridate) # A helpful library for formatting data
+library(data.table) # loading for fread function in the data loading
+library(Rcpp) # contains functions useful for splitting up and assigning data
+library(DataExplorer) # contains a function useful for EDA plotting
+
+```
+
+Here are the system and packages loaded:
+
+```{r}
+# Let's display the system info
+sessionInfo()
+```
+
+Time to Load the Data. The MovieLens 10M dataset can be found here:
+* <https://grouplens.org/datasets/movielens/10m/>
+* <http://files.grouplens.org/datasets/movielens/ml-10m.zip>
+
+This following script section will download the data, load it, and create the initial datasets.
+```{r}
+dl <- tempfile()
+options(timeout = 300, download.file.method="libcurl", url.method="libcurl") # Added to try and work around the download timeout
+download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+ratings <- fread(text = gsub("::", "\t", readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+                 col.names = c("userId", "movieId", "rating", "timestamp"))
+
+movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+colnames(movies) <- c("movieId", "title", "genres")
+
+# if using R 4.0 or later versions:
+movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(movieId), title = as.character(title), genres = as.character(genres))
+movielens <- left_join(ratings, movies, by = "movieId")
+
+# if using R 3.6 or earlier:
+# movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(levels(movieId))[movieId], title = as.character(title), genres = as.character(genres))
+```
+
+---
+
+# Analysis
+
+Time to perform some Exploratory Data Analysis.
+
+The Head of each Table (first 10 rows)
+```{r}
+# Display the very top 10 rows of the data table
+head(movielens, 10)
+head(movies, 10)
+head(ratings, 10)
+```
+
+The column headers, data type, and initial values
+```{r}
+# Display the Column Names, data type, and the initial values.
+str(movielens)
+str(movies)
+str(ratings)
+```
+
+Checking for Missing data:
+```{r}
+# Before we move to much on, let's check the data tables for any missing data.
+sum(is.na(movielens))
+sum(is.na(movies))
+sum(is.na(ratings))
+```
+We see that there are no missing values in any of the datasets. This makes analyzing the dataset convenient. 
+
+Checking for Dupliacte data:
+```{r}
+# Check the number of rows before
+sum(duplicated(movielens))
+sum(duplicated(movies))
+sum(duplicated(ratings))
+```
+There were no rows of duplicated data.  So, the dataset is ready for analysis.  Thus, let's check some summary statistics.
+
+## Data Exploration
+
+```{r}
+# Summary - Displays the Mean, Median, 25th Quartile, 75th Quartile, Min, Max
+summary(movielens)
+```
+
+```{r}
+# Let's find the number of unique movies
+movielens$movieId %>% unique() %>% length()
+```
+
+```{r}
+# Let's find the number of unique users
+movielens$userId %>% unique() %>% length()
+```
+
+```{r}
+# Let's find the number of unique movie genres
+movielens$genres %>% unique() %>% length()
+```
+This seems like a lot of movie genres.  However, this is because there are typically multiple genres listed for each film.  This makes for many combinations.  It would be much simpler if we separated these out individually.
+
+```{r}
+# Let's find the number of movies within each genre
+genres <- c("Action", "Adventure", "Animation", "Children", "Comedy", "Crime","Documentary", "Drama", "Fantasy", "FilmNoir", "Horror", "Musical", "Mystery","Romance", "SciFi", "Thriller", "War", "Western")
+sapply(genres, function(g) {sum(str_detect(movielens$genres, g))})
+```
+
+```{r}
+# Let's find the top ten movies with the most ratings
+movielens %>% group_by(movieId) %>%
+  summarise(n_ratings=n(), title=first(title)) %>%
+  top_n(10, n_ratings)
+```
+
+```{r}
+# Let's find the frequency of ratings overall
+movielens %>% group_by(rating) %>%
+  summarise(n_ratings=n()) %>%
+  top_n(10, n_ratings) %>%
+  arrange(desc(n_ratings))
+```
+
+## Dataset Visualization
+
+```{r}
+# Let's graph the occurrence of each rating
+movielens %>%
+    group_by(rating) %>%
+    summarize(count = n()) %>%
+    ggplot(aes(x = rating, y = count)) +
+    geom_line() +
+    ggtitle("Number of Occurence of each Rating")
+```
+
+```{r}
+# Let's see the number of ratings for each movie
+movielens %>%
+  group_by(movieId) %>%
+  summarise(n_reviews=n()) %>%
+  ggplot(aes(n_reviews)) +
+  geom_histogram(color="black") +
+  scale_x_log10() +
+  ggtitle("Histogram of Number of Reviews for each Movie")
+```
+
+```{r}
+# Let's see the number of ratings made by each user
+movielens %>%
+  group_by(userId) %>%
+  summarise(n_reviews=n()) %>%
+  ggplot(aes(n_reviews)) +
+  geom_histogram(color="black") +
+  scale_x_log10() +
+  ggtitle("Histogram of number of reviews made by each user")
+```
+
+```{r}
+# Let's see the correlations between variables
+plot_correlation(movielens)
+```
+
+
+## Insights Gained
+
+From the data exploration, it can be seen that most users have made 100 reviews or fewer and that the mode review ratings are 3 and 4.  Furthermore, reviewers tend to give ratings as whole-numbers more often than half-star ratings.  The movies in the Action, Adventure, and Animation genres receive the most reviews.
+
+
+# Data Cleaning
+
+We can see that the timestamp column in the movielens and ratings data tables are displaying incorrectly.  Let's update this.
+
+```{r}
+# Formatting the timestamps
+ratings <- ratings %>% mutate(timestamp=as_datetime(timestamp)) #converting
+ratings %>% rename(rating_datetime = timestamp) # rename the timestamp column to be more representative
+
+movielens <- movielens %>% mutate(timestamp=as_datetime(timestamp))
+movielens %>% rename(rating_datetime = timestamp) # rename the timestamp column to be more representative
+
+# Check the results
+head(ratings)
+head(movielens)
+```
+
+There is still more data cleaning to do.  If you notice, the timestamps were of movie ratings, not necessarily the release date of the movies themselves. The movie release year is still in the same feature as the Movie name.  These need to be separated.
+
+```{r}
+#extracting the premier date from the movies data frame
+movies$premier_date <- stringi::stri_extract(movies$title, regex = "(\\d{4})", comments = TRUE ) %>% as.numeric()
+
+#extracting the premier date from the movielens data frame
+movielens$premier_date <- stringi::stri_extract(movielens$title, regex = "(\\d{4})", comments = TRUE ) %>% as.numeric()
+
+# Check the results
+head(movies)
+head(movielens)
+```
+
+There is one more collosal task.  The genre section can contain multiple genres for each movie.  This is not very helpful. To increase the utility of the genre information, it is going to be converted to new columns of genres with 0 and 1 encoding for each row of data.
+
+```{r}
+# Let's one-hot encode the movies data frame
+movies_one_hot <- movies %>% separate_rows(genres,sep = "\\|") %>% mutate(value=1)
+movies_one_hot <- movies_one_hot %>% spread(genres, value, fill=0) %>% select(-"(no genres listed)")
+
+# Let's one-hot encode the movielens data frame
+movielens_one_hot <- movielens %>% separate_rows(genres,sep = "\\|") %>% mutate(value=1)
+movielens_one_hot <- movielens_one_hot %>% spread(genres, value, fill=0) %>% select(-"(no genres listed)")
+```
+
+Now, we are ready to split the data into a training and validation set, utilizing the script provided within the capstone assignment on edx. It will create a Validation set consisting of 10% of MovieLens data called "validation" and a training set called "edx" that contains 90% of the data.  For training the models, only the caret library will be used for the fitting process, which will automatically split the training data into a train and test set.  So, only a hold-out validation set is needed to evaluate the models created.
+
+```{r}
+# There are some errors that may occur that can only be fixed by installing and loading the Rcpp package in the current instance of R.
+# install.packages("Rcpp")
+# library(Rcpp) # Reloading the Rcpp package to address any potential error message
+# Rcpp::Rcpp_precious_remove()
+
+# Time to proceed with the edx R script to split the data
+set.seed(1, sample.kind="Rounding") # if using R 3.5 or earlier, use `set.seed(1)`
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE) # The only caret function utilized (for splitting data)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in validation set are also in edx set
+validation <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from validation set back into edx set
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+
+# Time to proceed with the edx R script to split the data
+test_index_one_hot <- createDataPartition(y = movielens_one_hot$rating, times = 1, p = 0.1, list = FALSE) # The only caret function utilized (for splitting data)
+edx_one_hot <- movielens_one_hot[-test_index,]
+temp_one_hot <- movielens_one_hot[test_index,]
+
+# Make sure userId and movieId in validation set are also in edx set
+validation_one_hot <- temp %>% 
+  semi_join(edx_one_hot, by = "movieId") %>%
+  semi_join(edx_one_hot, by = "userId")
+
+# Add rows removed from validation set back into edx set
+removed_one_hot <- anti_join(temp_one_hot, validation_one_hot)
+edx_one_hot <- rbind(edx_one_hot, removed_one_hot)
+
+# Remove data no longer needed
+rm(dl, ratings, movies, test_index, temp, movielens, removed, genres)
+```
+
+
+# Modeling
+
+Now that we have an understanding of the dataset, and the data has been prepared, it is time to build models.
+
+For the modeling, H2O is going to be utilized for its speed and memory compression.  Nevertheless, the modeling process will consume up to 64 GB of RAM while it creates various regression, ensemble, or neural network models. These steps were attemped before using Caret, NerualNet, and RandomForest libraries and required even more RAM (up to 450GB of RAM).  This is beyond the capacity of most users and may require access to a High-Performance-Computer at an institution or renting cloud computing clusters.  H2O is much more pragmatic for a high-end desktop personal computer.  The H2O library utilizes Java to enable greater parallel processing and utilize memory more efficiently.  It will use a greater amount of the processor clock cycles than other packages (e.g., Caret) while using up to 20x less RAM.
+
+Note:  Ensure that **Java 64-bit** and **R 64-bit** are installed prior to running these scripts.
+
+
+
+### Initialize H2O
+
+```{r initiate h2o}
+## Initialize H2O
+h2o.init(
+    nthreads = -1, # Specifying to use all processor cores available
+    max_mem_size = "64G" # Specifying to use 64GB of RAM.
+)
+```
+
+```{r convert data to h2o format}
+## Convert current dataframes to H2O dataframes
+## This might also use a large amount of memory, so one data frame will be converted and removed at a time.
+
+validation_one_hot_h2o <- as.h2o(validation_one_hot) # Convert current dataframe to h2o dataframe
+validation_one_hot_h2o[c("rating", "userId", "movieId", "premier_date")] <- as.factor(validation_one_hot_h2o[c("rating", "userId", "movieId", "premier_date")]) #  Changing target column type to factor for classification work in h2o
+# rm(validation_one_hot) # Remove old data file to preserve memory
+
+edx_one_hot_h2o <- as.h2o(edx_one_hot) # Convert current dataframe to h2o dataframe
+edx_one_hot_h2o[c("rating", "userId", "movieId", "premier_date")] <- as.factor(edx_one_hot_h2o[c("rating", "userId", "movieId", "premier_date")]) # Changing target column type to factor for classification work in h2o
+# rm(edx_one_hot) # Remove old data file to preserve memory
+```
+
+```{r assign the target feature and training features}
+# Assign the training and target variables.
+y <- "rating" # target feature
+x <- setdiff(names(edx_one_hot_h2o), y) # all the training features minus the target feature
+```
+
+```{r GLM model creation, echo=TRUE, message=FALSE, results='hide'}
+
+# Set hyperparameter grid for GLM:
+glm_hyper_grid.h2o <- list(
+  alpha = seq(0, 1, by = 0.05)
+)
+
+# Create a Random Discrete Grid Search
+glm_search_criteria <- list(
+    strategy = "RandomDiscrete", # Selecting Random Search of the hyperparameter grid
+    stopping_metric = "RMSE", # The metric being optimized for in model training
+    seed = 42, # Setting the seed to the answer to life, the universe, and everything.
+    max_runtime_secs = 120*60 # Two hour run time
+)
+
+# Model 3:  Generalized Linear Model (GLM)
+glm_random_grid <- h2o.grid(
+    algorithm = "glm", # Selecting the Algorithm to build the model
+    grid_id = "glm_grid", # Naming the Grid
+    x = x, # Specifying the training data labels
+    y = y, # Specifying the target attribute label
+    nfolds = 5, # K-Fold Cross Validation
+    training_frame = edx_one_hot_h2o, # Training Data selection
+    hyper_params = glm_hyper_grid.h2o, # Specifying the hyperparameter grid to try
+    search_criteria = glm_search_criteria # Specifying the search criteria to utilize
+)
+
+```
+
+```{r GLM model evaluation}
+
+# Collect the results and sort by our models: 
+glm_grid_perf <- h2o.getGrid(
+    grid_id = "glm_grid", # Grid of models
+    sort_by = "RMSE", # Sorting the leaderboard by the desired metric
+    decreasing = FALSE # Sort by Ascending/Increasing Values
+)
+print(glm_grid_perf)
+
+# Select the best model
+best_glm_model <- h2o.getModel(glm_grid_perf@model_ids[[1]])
+print(best_glm_model@model[["model_summary"]])
+
+# Retrieve the variable importance
+glm_varimp <- h2o.varimp(best_glm_model)
+print(glm_varimp)
+
+# Check model performance
+glm_perf <- h2o.performance(best_glm_model, validation_one_hot_h2o)
+glm_rmse <- h2o.rmse(glm_perf)
+print(glm_rmse)
+
+```
+
+
+```{r GBM model creation, echo=TRUE, message=FALSE, results='hide'}
+
+# Set hyperparameter grid:
+gbm_hyper_grid.h2o <- list(
+    ntrees = c(10, 50, 100, 150, 200),
+    max_depth = c(3, 5, 7, 9, 11, 13, 15, 17, 19, 21),
+    learn_rate = c(0.001, 0.01, 0.05, 0.1, 0.15, 0.2)
+)
+
+# Create a Random Discrete Grid Search
+gbm_search_criteria <- list(
+    strategy = "RandomDiscrete", # Selecting Random Search of the hyperparameter grid
+    stopping_metric = "RMSE", # The metric being optimized for in model training
+    seed = 42, # Setting the seed to the answer to life, the universe, and everything.
+    max_runtime_secs = 120*60 # Specifying a max run-time for this command in seconds (two hours)
+)
+
+# Model 3:  Gradient Boosting Machine modeling
+gbm_random_grid <- h2o.grid(
+    algorithm = "gbm", # Selecting the Algorithm to build the model
+    grid_id = "gbm_grid", # Naming the grid
+    x = x, # Specifying the training data labels
+    y = y, # Specifying the target attribute label
+    nfolds = 5, # K-Fold Cross Validation
+    training_frame = edx_one_hot_h2o, # Training Data selection
+    hyper_params = gbm_hyper_grid.h2o, # Specifying the hyperparameter grid to try
+    search_criteria = gbm_search_criteria # Specifying the search criteria to utilize
+)
+
+```
+```{r GBM model evaluation}
+
+# Collect the results and sort by our models: 
+gbm_grid_perf <- h2o.getGrid(
+    grid_id = "gbm_grid", # Grid of models
+    sort_by = "RMSE", # Sorting the leaderboard by the desired metric
+    decreasing = FALSE # Sort by Ascending/Increasing Values
+)
+print(gbm_grid_perf)
+
+# Best model: 
+best_gbm_model <- h2o.getModel(gbm_grid_perf@model_ids[[1]])
+print(best_gbm_model@model[["model_summary"]])
+
+# Retrieve the variable importance
+gbm_varimp <- h2o.varimp(best_gbm_model)
+print(gbm_varimp)
+
+# Check model performance
+gbm_perf <- h2o.performance(best_gbm_model, validation_one_hot_h2o)
+gbm_rmse <- h2o.rmse(gbm_perf)
+print(gbm_rmse)
+
+```
+
+
+```{r Naive Bayes model creation, echo=TRUE, message=FALSE, results='hide'}
+
+# Model 3:  Naive Bayes
+
+# Set hyperparameter grid:
+hyper_params <- list(
+    laplace = seq(0, 1, by = 0.1)
+)
+
+# Create a Random Discrete Grid Search
+nb_search_criteria <- list(
+    strategy = "RandomDiscrete", # Selecting Random Search of the hyperparameter grid
+    stopping_metric = "RMSE", # The metric being optimized for in model training
+    seed = 42, # Setting the seed to the answer to life, the universe, and everything.
+    max_runtime_secs = 120*60 # Specifying a max run-time for this command in seconds (two hours)
+)
+
+# Parameters for Naieve Bayes model
+nb_random_grid <- h2o.grid(
+    algorithm = "naivebayes", # Selecting the Algorithm to build the model
+    grid_id = "nb_grid", # Naming the grid
+    x = x, # Specifying the training data labels
+    y = y, # Specifying the target attribute label
+    nfolds = 5, # K-Fold Cross Validation
+    training_frame = edx_one_hot_h2o, # Training Data selection
+    hyper_params = hyper_params, # Specifying the hyperparameter grid to try
+    search_criteria = nb_search_criteria # Specifying the search criteria to utilize
+)
+
+```
+
+```{r Naive Bayes model evaluation}
+
+# Collect the results and sort by our models: 
+nb_grid_perf <- h2o.getGrid(
+    grid_id = "nb_grid", # Grid of models
+    sort_by = "RMSE", # Sorting the leaderboard by the desired metric
+    decreasing = FALSE # Sort by Ascending/Increasing Values
+)
+print(nb_grid_perf)
+
+# Best model: 
+best_nb_model <- h2o.getModel(nb_grid_perf@model_ids[[1]])
+print(best_nb_model@model[["model_summary"]])
+
+# Check model performance
+nb_perf <- h2o.performance(
+  best_nb_model, 
+  newdata = validation_one_hot_h2o)
+nb_rmse <- h2o.rmse(nb_perf)
+print(nb_rmse)
+
+```
+
+```{r h2o Random Forest model creation, echo=TRUE, message=FALSE, results='hide'}
+
+# Set hyperparameter grid for RF:
+rf_hyper_grid <- list(
+    ntrees = seq(1, 100, by = 3),
+    mtries = seq(1, 100, by = 3),
+    max_depth = seq(1, 25, by = 3),
+    min_rows = seq(1, 10, by = 1),
+    nbins = seq(1, 1000, by = 25),
+    sample_rate = seq(0.05, 0.95, by = 0.1)
+)
+
+# Create a Random Discrete Grid Search
+rf_search_criteria <- list(
+    strategy = "RandomDiscrete", # Selecting Random Search of the hyperparameter grid
+    stopping_metric = "RMSE", # The metric being optimized for in model training
+    max_runtime_secs = 120*60, # Specifying a max run-time for this command in seconds (two hours)
+    stopping_tolerance = 0.005, # stop if improvement is < 0.5%
+    stopping_rounds = 10 # Over the last 10 models
+)
+
+# Parameters for Random Forest Model
+random_grid <- h2o.grid(
+    algorithm = "randomForest", # Selecting the Algorithm to build the model
+    grid_id = "rf_grid", # Naming the grid
+    x = x, # Specifying the training data labels
+    y = y, # Specifying the target attribute label
+    seed = 42, # Setting the seed to the answer to life, the universe, and everything.
+    nfolds = 5, # K-Fold Cross Validation
+    training_frame = edx_one_hot_h2o, # Training Data selection
+    hyper_params = rf_hyper_grid, # Specifying the hyperparameter grid to try
+    search_criteria = rf_search_criteria # Specifying the search criteria to utilize
+)
+
+```
+
+```{r h2o Random Forest model creation and evaluate}
+
+# Collect the results and sort by our models: 
+rf_grid_perf <- h2o.getGrid(
+    grid_id = "rf_grid", # Grid of models
+    sort_by = "RMSE", # Sorting the leaderboard by the desired metric
+    decreasing = FALSE # Sort by Ascending/Increasing Values
+)
+print(rf_grid_perf)
+
+# Best model: 
+best_rf_model <- h2o.getModel(rf_grid_perf@model_ids[[1]])
+print(best_rf_model)
+
+# Retrieve the variable importance
+rf_varimp <- h2o.varimp(best_rf_model)
+print(rf_varimp)
+
+# Check Model performance
+rf_perf <- h2o.performance(best_rf_model, validation_one_hot_h2o)
+rf_rmse <- h2o.rmse(rf_perf)
+print(rf_rmse)
+
+```
+
+
+```{r h2o Neural Network model creation, echo=TRUE, message=FALSE, results='hide'}
+
+# Set hyperparameter grid:
+nn_hyper_grid <- list(
+    hidden = list(
+      c(23), # One hidden layer with 23 nodes since there are 23 features/variables
+      c(23,23), # two hidden layers
+      c(23, 23, 23), # three hidden layers
+      c(23, 23, 23, 23), # four hidden layers
+      c(23, 23, 23, 23, 23) # five hidden layers
+    ),
+    input_dropout_ratio = seq(0, 0.1, by = 0.01),
+    rate = seq(0, 0.05, by = 0.01),
+    rate_annealing = c(1e-10,1e-9,1e-8,1e-7,1e-6,1e-5)
+)
+
+# Create a Random Discrete Grid Search
+nn_search_criteria <- list(
+    strategy = "RandomDiscrete", # Selecting Random Search of the hyperparamter grid
+    stopping_metric = "RMSE", # The metric being optimized for in model training
+    seed = 42, # Setting the seed to the answer to life, the universe, and everything.
+    max_runtime_secs = 120*60 # Specifying a max run-time for this command in seconds (two hours)
+)
+
+# Parameters for Gradient Boost Machine
+nn_random_grid <- h2o.grid(
+    algorithm = "deeplearning", # Selecting the Algorithm to build the model
+    grid_id = "nn_grid", # naming the grid
+    x = x, # Feature  variable selection
+    y = y, # Target variable selection
+    nfolds = 5, # K-Fold Cross Validation
+    training_frame = edx_one_hot_h2o, # Training Data selection
+    hyper_params = nn_hyper_grid, # Specifying the hyperparameter grid to try
+    search_criteria = nn_search_criteria # Specifying the search criteria to utilize
+)
+
+```
+
+```{r h2o Neural Network model evaluation}
+
+# Collect the results and sort by our models: 
+nn_grid_perf <- h2o.getGrid(
+    grid_id = "nn_grid", # Grid of models
+    sort_by = "RMSE", # Sorting the leaderboard by the desired metric
+    decreasing = FALSE # Sort by Ascending/Increasing Values
+)
+print(nn_grid_perf)
+
+# Best model: 
+best_nn_model <- h2o.getModel(nn_grid_perf@model_ids[[1]])
+print(best_nn_model@model[["model_summary"]])
+
+# Check model performance
+nn_perf <- h2o.performance(
+  best_nn_model, 
+  newdata = validation_one_hot_h2o)
+nn_rmse <- h2o.rmse(nn_perf)
+print(nn_rmse)
+```
+
+
+```{r AutoML model creation, echo=TRUE, message=FALSE, results='hide'}
+
+# Setup the Auto Machine Learning Modeling
+aml2 <- h2o.automl(
+    x = x, # Specifying the training data labels
+    y = y, # Specifying the target attribute label
+    training_frame = edx_one_hot_h2o, # Specifying the data to be used for training the model
+    validation_frame = validation_one_hot_h2o, # Specifying the data to be used for evaluating the model
+    stopping_metric = c("RMSE"), # The metric being optimized for in model training
+    stopping_rounds = 5, # Specifying that each algorithm-iteration should be judged against the moving average of the last five models
+    sort_metric = c("RMSE"), # Sorting the leaderboard by the desired metric
+    nfolds = 0, # Normally n-folds would be != 0 in order to use cross-validation.  However, for AutoML, when n-folds !=0, the validation_frame is ignored
+    seed = 42, # Setting the seed for reproducibility and the answer to the universe, life, and everything
+    max_runtime_secs = 120*60, # Specifying a max run-time for this command in seconds (two hours)
+)
+
+```
+
+```{r AutoML model evaluation, echo=TRUE, message=FALSE, results='hide'}
+
+# Best model: 
+best_aml2_model <- h2o.get_best_model(aml2)
+print(best_aml2_model)
+
+aml <- h2o.get_best_model(aml2)
+preds <- h2o.predict(aml, validation_one_hot_h2o)
+aml@model$validation_metrics@metrics$max_criteria_and_metric_scores
+print(aml@model$validation_metrics@metrics$max_criteria_and_metric_scores)
+
+perf <- h2o.performance(model = aml, newdata = validation_one_hot_h2o)
+autoML_rmse <- h2o.rmse(perf)
+print(autoML_rmse)
+```
+
+---
+
+# Results
+
+Modeling results and performance
+
+```{r Summary Results of Models}
+
+## Display a table summarizing the RSME generated by models
+rmse_results <- c(glm_rmse, gbm_rmse, nb_rmse, rf_rmse, nn_rmse, autoML_rmse) # Column of metric results
+rmse_names <-  c("GLM", "GBM", "NB", "RF", "NN", "AutoML") # Label column for the corresponding metrics
+rmse_df <- base::data.frame(rmse_names, rmse_results) 
+ # Create a dataframe of results and sort in ascending order
+print(rmse_df %>% dplyr::arrange(rmse_df$rmse_results)) # Display the sorted dataframe
+
+```
+
+```{r Closing the h2o Cluster}
+
+# Close the h2o cluster
+# h2o.shutdown(prompt=F)
+
+```
+
+---
+
+# Conclusion
+
+From the dataframe of results, it is observed that the ultimate, best-performing model was Naive Bayes.  The penultimate model was one generated by the AutoML function, which produced a Deep Learning Neural Network.  The antepenultimate model was the Generalized Linear Model leveraging a multinomial elastic net.  Despite this, the Generalized Linear Model, Random Forest, and Neural Net all performed similarity with RMSE results around 0.8.  The Gradient Boost Machine finished last with the largest RMSE.  Nevertheless, all models created had RMSE results below the target of 0.86490 stated in the MovieLens Capstone assignment rubric.  In this regard, the limited scope of this project was achieved.
+
+However, there can always be improvements.  Further model building and optimization may be achieved by:
+* Augmenting the dataset via web scraping to add additional features such as studio, director, budget, producers, actors, filming locations, etc.
+* Reducing the number of features by performed such methods as filter methods (univariate and/or multivariate scores), search methods (e.g., forward-selection, backward-selection, or recursive feature elimination), or embedded methods such as regularization (e.g., L1 and L2).  This would reduce the size of the dataset and potentially reduce overfitting, thereby improving model performance.  Reducing the dataset may also allow 
+* Try exhaustive cross-validation grid search.  By using Random Search, it is possible that a localized optimization was found instead of a global optimum.  Furthermore, the training process for computationally expensive algorithms was probably interrupted before many hyperparameters were evaluated.  By using grid-search and extending the maximum run time, more optimal models could be generated.
+* In additional to n-fold cross-validation, Leave-p-out Cross-Validation could be performed to further produce a more optimal model if more computational resources are available.
+* Normalize the ratings data.  Most of the models utilized are not impacted by scaling (e.g. Random Forest), but some algorithms such as Naive Bayes may yield improved performance if the data distribution was closer to a normal distribution.
+* Try additional models and packages:
+  + *recommenderlab*.  This package was not used for this project because it will require a smaller dataset than the one-hot-encoded dataset utilized in this project.  Feature Selection or Bagging could accomplish this.
+  + Support Vector Machines
+  + XGBoost (requires Linux in H2O or use of a different package(s))
+  + Deep Learning Models
+* Try additional packages that may accelerate computation (e.g., H2O4GPU) and/or utilize larger computational systems (e.g. cloud virtual machines)
+* Evaluate the models using other metrics for classification, including a confusion matrix, and other derived metrics such as Accuracy, F1 Score, and/or Critical Success Index.
+
+Overall, this capstone project was challenging and I learned a lot about R and the packages I used to complete the assignment.
